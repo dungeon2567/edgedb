@@ -19,6 +19,7 @@
 
 import asyncio
 import base64
+import collections
 import os.path
 import pickle
 import subprocess
@@ -113,7 +114,8 @@ class Worker:
 
 class Manager:
 
-    def __init__(self, *, worker_cls, worker_args, loop, name, runstate_dir):
+    def __init__(self, *, worker_cls, worker_args,
+                 loop, name, runstate_dir, pool_size=0):
 
         self._worker_cls = worker_cls
         self._worker_args = worker_args
@@ -126,6 +128,8 @@ class Manager:
         self._poolsock_name = os.path.join(
             self._runstate_dir, f'{name}.socket')
 
+        self._pool_size = pool_size
+        self._workers_pool = collections.deque()
         self._workers = set()
 
         self._server = amsg.Server(self._poolsock_name, loop)
@@ -151,17 +155,37 @@ class Manager:
     def is_running(self):
         return self._running
 
+    async def _spawn_worker(self):
+        worker = Worker(self, self._server, self._worker_command_args)
+        await worker._spawn()
+        return worker
+
+    async def _spawn_for_pool(self):
+        worker = await self._spawn_worker()
+        self._workers_pool.appendleft(worker)
+        return worker
+
     async def spawn_worker(self):
         if not self._running:
             raise RuntimeError('cannot spawn a worker: not running')
-        worker = Worker(self, self._server, self._worker_command_args)
-        await worker._spawn()
+
+        if self._workers_pool:
+            worker = self._workers_pool.pop()
+            asyncio.create_task(self._spawn_for_pool())
+        else:
+            worker = await self._spawn_worker()
+
         self._workers.add(worker)
         return worker
 
     async def start(self):
         await self._server.start()
         self._running = True
+
+        if self._pool_size:
+            async with taskgroup.TaskGroup(name='manager-start') as g:
+                for _ in range(self._pool_size):
+                    g.create_task(self._spawn_for_pool())
 
     async def stop(self):
         if not self._running:
@@ -173,6 +197,10 @@ class Manager:
         for worker in list(self._workers):
             worker.close()
 
+        for worker in list(self._workers_pool):
+            worker.close()
+
+        self._workers_pool.clear()
         self._workers.clear()
         self._running = False
 

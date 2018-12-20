@@ -207,7 +207,14 @@ class ConnectedTestCase(ClusterTestCase):
         conargs = cluster.get_connect_args().copy()
         conargs.update(dict(
             user='edgedb', database=database, port=conargs['port'] + 1))
-        return loop.run_until_complete(edgedb.connect(**conargs))
+
+        import time
+        st = time.monotonic()
+        try:
+            return loop.run_until_complete(edgedb.connect(**conargs))
+        finally:
+            with open('a', 'at') as f:
+                f.write(f'{time.monotonic() - st:.5f}\n')
 
     @classmethod
     def setUpClass(cls):
