@@ -505,6 +505,21 @@ class Schema:
 
             return frozenset(referrers)
 
+    @functools.lru_cache()
+    def get_all_assignment_casts(self):
+        referrers = set()
+        scls_type = s_casts.Cast
+        field_name = 'from_type'
+        for refs in self._refs_to.values():
+            for (st, fn), ids in refs.items():
+                if st is scls_type and fn == field_name:
+                    casts = [self._id_to_type[objid] for objid in ids]
+                    referrers.update(
+                        cast for cast in casts
+                        if cast.get_allow_assignment(self))
+
+        return frozenset(referrers)
+
     def get_by_id(self, obj_id, default=_void):
         try:
             return self._id_to_type[obj_id]

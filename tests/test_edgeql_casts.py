@@ -1113,3 +1113,210 @@ class TestEdgeQLCasts(tb.QueryTestCase):
             [True],
             [True],
         ])
+
+    # Assignment casts can be used as explicit casts. This implies
+    # that only valid explicit casts can potentially also be allowed
+    # as assignment casts. So we only test valid casts here as opposed
+    # to every type combination possible.
+    async def test_edgeql_casts_assignment_01(self):
+        async with self.con.transaction():
+            res = await self.query(r'''
+                SET MODULE test;
+
+                INSERT ScalarTest {
+                    p_bool := 'true'
+                };
+
+                SELECT ScalarTest { p_bool };
+
+                DELETE (SELECT ScalarTest FILTER EXISTS .p_bool);
+            ''')
+
+            self.assert_data_shape(
+                res[-2],
+                [{'p_bool': True}],
+            )
+
+    async def test_edgeql_casts_assignment_02(self):
+        async with self.con.transaction():
+            res = await self.query(r'''
+                SET MODULE test;
+
+                INSERT ScalarTest {
+                    p_datetime := '2018-05-07T20:01:22.306916+00:00'
+                };
+
+                SELECT ScalarTest { p_datetime };
+
+                DELETE (SELECT ScalarTest FILTER EXISTS .p_datetime);
+            ''')
+
+            self.assert_data_shape(
+                res[-2],
+                [{'p_datetime': '2018-05-07T20:01:22.306916+00:00'}],
+            )
+
+    async def test_edgeql_casts_assignment_03(self):
+        async with self.con.transaction():
+            res = await self.query(r'''
+                SET MODULE test;
+
+                INSERT ScalarTest {
+                    p_naive_datetime := '2018-05-07T20:01:22.306916'
+                };
+                INSERT ScalarTest {
+                    p_naive_datetime := <naive_date>'2018-05-07'
+                };
+
+                SELECT ScalarTest { p_naive_datetime }
+                ORDER BY .p_naive_datetime;
+
+                DELETE (SELECT ScalarTest FILTER EXISTS .p_naive_datetime);
+            ''')
+
+            self.assert_data_shape(
+                res[-2],
+                [{'p_naive_datetime': '2018-05-07T00:00:00'},
+                 {'p_naive_datetime': '2018-05-07T20:01:22.306916'}],
+            )
+
+    async def test_edgeql_casts_assignment_04(self):
+        async with self.con.transaction():
+            res = await self.query(r'''
+                SET MODULE test;
+
+                INSERT ScalarTest {
+                    p_naive_date := '2018-05-07'
+                };
+
+                SELECT ScalarTest { p_naive_date };
+
+                DELETE (SELECT ScalarTest FILTER EXISTS .p_naive_date);
+            ''')
+
+            self.assert_data_shape(
+                res[-2],
+                [{'p_naive_date': '2018-05-07'}],
+            )
+
+    async def test_edgeql_casts_assignment_05(self):
+        async with self.con.transaction():
+            res = await self.query(r'''
+                SET MODULE test;
+
+                INSERT ScalarTest {
+                    p_naive_time := '20:01:22.306916'
+                };
+
+                SELECT ScalarTest { p_naive_time };
+
+                DELETE (SELECT ScalarTest FILTER EXISTS .p_naive_time);
+            ''')
+
+            self.assert_data_shape(
+                res[-2],
+                [{'p_naive_time': '20:01:22.306916'}],
+            )
+
+    async def test_edgeql_casts_assignment_06(self):
+        async with self.con.transaction():
+            res = await self.query(r'''
+                SET MODULE test;
+
+                INSERT ScalarTest {
+                    p_timedelta := '20:01:22.306916'
+                };
+
+                SELECT ScalarTest { p_timedelta };
+
+                DELETE (SELECT ScalarTest FILTER EXISTS .p_timedelta);
+            ''')
+
+            self.assert_data_shape(
+                res[-2],
+                [{'p_timedelta': '20:01:22.306916'}],
+            )
+
+    async def test_edgeql_casts_assignment_07(self):
+        async with self.con.transaction():
+            res = await self.query(r'''
+                SET MODULE test;
+
+                INSERT ScalarTest {
+                    p_uuid := 'd4288330-eea3-11e8-bc5f-7faf132b1d84'
+                };
+
+                SELECT ScalarTest { p_uuid };
+
+                DELETE (SELECT ScalarTest FILTER EXISTS .p_uuid);
+            ''')
+
+            self.assert_data_shape(
+                res[-2],
+                [{'p_uuid': 'd4288330-eea3-11e8-bc5f-7faf132b1d84'}],
+            )
+
+    async def test_edgeql_casts_assignment_08(self):
+        async with self.con.transaction():
+            res = await self.query(r'''
+                SET MODULE test;
+
+                # str should have an assignment cast into any numeric type
+                INSERT ScalarTest {
+                    p_int16 := '1',
+                    p_int32 := '1',
+                    p_int64 := '1',
+                    p_float32 := '1',
+                    p_float64 := '1',
+                    p_decimal := '1',
+                };
+
+                SELECT ScalarTest {
+                    p_int16,
+                    p_int32,
+                    p_int64,
+                    p_float32,
+                    p_float64,
+                    p_decimal,
+                };
+
+                DELETE (SELECT ScalarTest FILTER EXISTS (.p_int16 + .p_int32));
+            ''')
+
+            self.assert_data_shape(
+                res[-2],
+                [{
+                    'p_int16': 1,
+                    'p_int32': 1,
+                    'p_int64': 1,
+                    'p_float32': 1,
+                    'p_float64': 1,
+                    'p_decimal': 1,
+                }],
+            )
+
+    async def test_edgeql_casts_assignment_09(self):
+        async with self.con.transaction():
+            # all numeric types should be assignment-castable into each other
+            numtypes = [
+                'int16',
+                'int32',
+                'int64',
+                'float32',
+                'float64',
+                'decimal',
+            ]
+
+            for target in numtypes:
+                for prop in numtypes:
+                    query = f'''
+                        INSERT test::ScalarTest {{
+                            p_{prop} := <{target}>1
+                        }};
+
+                        SELECT ScalarTest.p_{prop};
+
+                        DELETE (SELECT ScalarTest FILTER EXISTS .p_{prop});
+                    '''
+                    await self.assert_query_result(
+                        query, [{int}, {1}, {int}], msg=query)
